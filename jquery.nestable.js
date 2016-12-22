@@ -27,112 +27,192 @@
     })();
 
     var defaults = {
-        itemNodeName    : 'li',
-        expandBtnHTML   : '<button data-action="expand" type="button">Expand</button>',
-        collapseBtnHTML : '<button data-action="collapse" type="button">Collapse</button>',
-        group           : 0,
-        threshold       : 20
-    }
+            listNodeName    : 'ol',
+            itemNodeName    : 'li',
+            rootClass       : 'dd',
+            listClass       : 'dd-list',
+            itemClass       : 'dd-item',
+            dragClass       : 'dd-dragel',
+            handleClass     : 'dd-handle',
+            collapsedClass  : 'dd-collapsed',
+            placeClass      : 'dd-placeholder',
+            noDragClass     : 'dd-nodrag',
+            emptyClass      : 'dd-empty',
+            expandBtnHTML   : '<button data-action="expand" type="button">Expand</button>',
+            collapseBtnHTML : '<button data-action="collapse" type="button">Collapse</button>',
+            group           : 0,
+            maxDepth        : 5,
+            threshold       : 20
+        };
 
-    function addEvent(obj, evt, fn) {
-        if (obj.addEventListener)
-            obj.addEventListener(evt,fn,false);
-        else if (obj.attachEvent)
-            obj.attachEvent('on'+evt,fn);
-    }
-
-    function nestList(el, options){
-        this.w = $(document);
-        this.el = $(el);
+    function Plugin(element, options)
+    {
+        this.w  = $(document);
+        this.el = $(element);
         this.options = $.extend({}, defaults, options);
-        this.addEvtAction = addEvent;
         this.init();
     }
 
-    nestList.prototype ={
-        init: function(){
-            var list=this;
-            list.reset();
-            list.el.data('nestList-group', this.options.group);
-            list.placeEl = $('<div class="'+this.options.placeClass+'"/>');
+    Plugin.prototype = {
 
-            $.each(this.el.find(list.options.itemNodeName), function(idx, el){
+        init: function()
+        {
+            var list = this;
+
+            list.reset();
+
+            list.el.data('nestable-group', this.options.group);
+
+            list.placeEl = $('<div class="' + list.options.placeClass + '"/>');
+
+            $.each(this.el.find(list.options.itemNodeName), function(k, el) {
                 list.setParent($(el));
             });
 
-            list.el.on('click', 'button', function(evt){
-                if(list.dragEl) return;
+            list.el.on('click', 'button', function(e) {
+                if (list.dragEl) {
+                    return;
+                }
+                var target = $(e.currentTarget),
+                    action = target.data('action'),
+                    item   = target.parent(list.options.itemNodeName);
+                if (action === 'collapse') {
+                    list.collapseItem(item);
+                }
+                if (action === 'expand') {
+                    list.expandItem(item);
+                }
+            });
 
-                var target = $(evt.currentTarget),
-                action = target.data('action'),
-                item = target.parent(list.options.itemNodeName);
-
-                if(action === 'collapse') list.collapseItem(item);
-                if(action === 'expand') list.expandItem(item)
-            })
-
-            var onStartEvent = function(evt){
-                var handle = $(evt.target);
-                
-                if(handle.hasClass(list.options.handleClass)){
-                    if(handle.hasClass(list.options.noDragClass)){
+            var onStartEvent = function(e)
+            {
+                var handle = $(e.target);
+                if (!handle.hasClass(list.options.handleClass)) {
+                    if (handle.closest('.' + list.options.noDragClass).length) {
                         return;
                     }
                     handle = handle.closest('.' + list.options.handleClass);
                 }
 
-                if(!handle.length || list.dragEl) return;
-                
-                list.isTouch = /^touch/.test(evt.type);
-                if(list.isTouch && e.touchs.length!==1) return;
-
-                evt.preventDefault();
-                list.dragStart(evt.touches ? e.touches[0] : evt);
-            }
-
-            var onMoveEvent = function(evt){
-                if(list.dragEl){
-                    evt.preventDefault();
-                    list.dragMove(evt.touches ? e.touches[0] : evt)
+                if (!handle.length || list.dragEl) {
+                    return;
                 }
-            }
 
-            var onEndEvent = function(evt){
-                if(list.dragEl){
-                    evt.preventDefault();
-                    list.dragStop(evt.touches ? e.touches[0] : evt);
+                list.isTouch = /^touch/.test(e.type);
+                if (list.isTouch && e.touches.length !== 1) {
+                    return;
                 }
+
+                e.preventDefault();
+                list.dragStart(e.touches ? e.touches[0] : e);
+            };
+
+            var onMoveEvent = function(e)
+            {
+                if (list.dragEl) {
+                    e.preventDefault();
+                    list.dragMove(e.touches ? e.touches[0] : e);
+                }
+            };
+
+            var onEndEvent = function(e)
+            {
+                if (list.dragEl) {
+                    e.preventDefault();
+                    list.dragStop(e.touches ? e.touches[0] : e);
+                }
+            };
+
+            if (hasTouch) {
+                list.el[0].addEventListener('touchstart', onStartEvent, false);
+                window.addEventListener('touchmove', onMoveEvent, false);
+                window.addEventListener('touchend', onEndEvent, false);
+                window.addEventListener('touchcancel', onEndEvent, false);
             }
 
-            if(hasTouch){
-                this.addEvtAction(list.el[0], 'touchStart', onStartEvent);
-                this.addEvtAction(window, 'touchmove', onMoveEvent);
-                this.addEvtAction(window, 'touchend', onEndEvent);
-                this.addEvtAction(window, 'touchcancel', onEndEvent);
-            }
+            list.el.on('mousedown', onStartEvent);
+            list.w.on('mousemove', onMoveEvent);
+            list.w.on('mouseup', onEndEvent);
 
-            this.addEvtAction(list.el[0], 'mousedown', onStartEvent);
-            this.addEvtAction(list.w[0], 'mousemove', onMoveEvent);
-            this.addEvtAction(list.w[0], 'mouseup', onEndEvent);
         },
 
-        expandItem: function(li){
+        serialize: function()
+        {
+            var data,
+                depth = 0,
+                list  = this;
+                step  = function(level, depth)
+                {
+                    var array = [ ],
+                        items = level.children(list.options.itemNodeName);
+                    items.each(function()
+                    {
+                        var li   = $(this),
+                            item = $.extend({}, li.data()),
+                            sub  = li.children(list.options.listNodeName);
+                        if (sub.length) {
+                            item.children = step(sub, depth + 1);
+                        }
+                        array.push(item);
+                    });
+                    return array;
+                };
+            data = step(list.el.find(list.options.listNodeName).first(), depth);
+            return data;
+        },
+
+        serialise: function()
+        {
+            return this.serialize();
+        },
+
+        reset: function()
+        {
+            this.mouse = {
+                offsetX   : 0,
+                offsetY   : 0,
+                startX    : 0,
+                startY    : 0,
+                lastX     : 0,
+                lastY     : 0,
+                nowX      : 0,
+                nowY      : 0,
+                distX     : 0,
+                distY     : 0,
+                dirAx     : 0,
+                dirX      : 0,
+                dirY      : 0,
+                lastDirX  : 0,
+                lastDirY  : 0,
+                distAxX   : 0,
+                distAxY   : 0
+            };
+            this.isTouch    = false;
+            this.moving     = false;
+            this.dragEl     = null;
+            this.dragRootEl = null;
+            this.dragDepth  = 0;
+            this.hasNewRoot = false;
+            this.pointEl    = null;
+        },
+
+        expandItem: function(li)
+        {
             li.removeClass(this.options.collapsedClass);
             li.children('[data-action="expand"]').hide();
             li.children('[data-action="collapse"]').show();
             li.children(this.options.listNodeName).show();
         },
 
-        collapseItem: function(){
+        collapseItem: function(li)
+        {
             var lists = li.children(this.options.listNodeName);
-
-            if(lists.length){
+            if (lists.length) {
                 li.addClass(this.options.collapsedClass);
                 li.children('[data-action="collapse"]').hide();
-                li.children('[data-action="expend"]').show();
+                li.children('[data-action="expand"]').show();
                 li.children(this.options.listNodeName).hide();
             }
-            
         },
 
         expandAll: function()
@@ -151,82 +231,72 @@
             });
         },
 
-        setParent:  function(li){
-            if(li.children(this.options.listNodeName).length){
+        setParent: function(li)
+        {
+            if (li.children(this.options.listNodeName).length) {
                 li.prepend($(this.options.expandBtnHTML));
                 li.prepend($(this.options.collapseBtnHTML));
             }
-            li.children('[data-action="expend"]').hide();
+            li.children('[data-action="expand"]').hide();
         },
 
-        unsetParent: function(){
-            li.removeClass(this.collapsedClass);
+        unsetParent: function(li)
+        {
+            li.removeClass(this.options.collapsedClass);
             li.children('[data-action]').remove();
             li.children(this.options.listNodeName).remove();
         },
 
-        reset: function(){
-            this.mouse = {
-                offsetX  : 0,
-                offsetY  : 0,
-                startX   : 0,
-                startY   : 0,
-                lastX    : 0,
-                lastY    : 0,
-                nowX     : 0,
-                nowY     : 0,
-                distX    : 0,
-                distY    : 0,
-                dirX     : 0,
-                dirY     : 0,
-                dirAx    : 0,
-                lastDirX : 0,
-                lastDirY : 0,
-                distAxX  : 0,
-                distAxY  : 0
-            };
-            this.isTouch    = false;
-            this.moving     = false;
-            this.dragEl     = null;
-            this.dragRootEl = null;
-            this.dragDepth  = 0;
-            this.hasNewRoot = false;
-            this.pointEl    = null;
-        },
-
-        dragStart: function(evt){
-            var mouse = this.mouse,
-            target = $(evt.target),
-            dragItem = target.closest(this.options.itemNodeName);
+        dragStart: function(e)
+        {
+            var mouse    = this.mouse,
+                target   = $(e.target),
+                dragItem = target.closest(this.options.itemNodeName);
 
             this.placeEl.css('height', dragItem.height());
 
-            mouse.offsetX = evt.offsetX !== undefined ? evt.offsetX : evt.pageX - target.offset().left;
-            mouse.offsetY = evt.offsetY !== undefined ? evt.offsetY : evt.pageY - target.offset().top;
-            mouse.startX = mouse.lastX = evt.pageX;
-            mouse.startY = mouse.lastY = evt.pageY;
+            mouse.offsetX = e.offsetX !== undefined ? e.offsetX : e.pageX - target.offset().left;
+            mouse.offsetY = e.offsetY !== undefined ? e.offsetY : e.pageY - target.offset().top;
+            mouse.startX = mouse.lastX = e.pageX;
+            mouse.startY = mouse.lastY = e.pageY;
 
             this.dragRootEl = this.el;
 
-            this.dragEl = $(document.createElement(this.options.listNodeName)).addClass(this.options.listClass +' '+ this.options.dragClass);
+            this.dragEl = $(document.createElement(this.options.listNodeName)).addClass(this.options.listClass + ' ' + this.options.dragClass);
             this.dragEl.css('width', dragItem.width());
 
             dragItem.after(this.placeEl);
-            dragItem.detach().appendTo(this.dragEl);
-            $('body').append(this.dragEl);
+            dragItem[0].parentNode.removeChild(dragItem[0]);
+            dragItem.appendTo(this.dragEl);
+
+            $(document.body).append(this.dragEl);
             this.dragEl.css({
-                'left': evt.pageX - mouse.offsetX,
-                'top': evt.pageY - mouse.offsetY
-            })
-
-            var i, depth, 
+                'left' : e.pageX - mouse.offsetX,
+                'top'  : e.pageY - mouse.offsetY
+            });
+            // total depth of dragging item
+            var i, depth,
                 items = this.dragEl.find(this.options.itemNodeName);
-
-            for(var i=items.length; i--;){
+            for (i = 0; i < items.length; i++) {
                 depth = $(items[i]).parents(this.options.listNodeName).length;
-                if(depth > this.dragDepth) this.dragDepth = depth;
+                if (depth > this.dragDepth) {
+                    this.dragDepth = depth;
+                }
             }
+        },
 
+        dragStop: function(e)
+        {
+            var el = this.dragEl.children(this.options.itemNodeName).first();
+            el[0].parentNode.removeChild(el[0]);
+            this.placeEl.replaceWith(el);
+
+            this.dragEl.remove();
+            this.el.trigger('change');
+            if (this.hasNewRoot) {
+                this.dragRootEl.trigger('change');
+            }
+            this.reset();
         },
 
         dragMove: function(e)
@@ -385,36 +455,30 @@
                     this.hasNewRoot = this.el[0] !== this.dragRootEl[0];
                 }
             }
-        },
-
-        dragStop: function(){
-            var el = this.dragEl.children(this.options.itemNodeName).first();
-            this.placeEl.replaceWith(el.detach());
-
-            this.dragEl.remove();
-            // this.el.trigger('change');
-            // if(this.hasNewRoot) this.dragRootEl.trigger('change');
-            this.reset();
         }
-    }
 
-    $.fn.nestable = function(params){
-        var lists = this,
+    };
+
+    $.fn.nestable = function(params)
+    {
+        var lists  = this,
             retval = this;
 
-        lists.each(function(){
-            var plugin = $(this).data('nestList');
+        lists.each(function()
+        {
+            var plugin = $(this).data("nestable");
 
-            if(!plugin){
-                $(this).data("nestable", new nestList(this, params));
-                // $(this).data("nestable-id", new Date().getTime());
-            }else{
-                if(typeof params === 'string' && typeof plugin[params] === 'function'){
-
+            if (!plugin) {
+                $(this).data("nestable", new Plugin(this, params));
+                $(this).data("nestable-id", new Date().getTime());
+            } else {
+                if (typeof params === 'string' && typeof plugin[params] === 'function') {
+                    retval = plugin[params]();
                 }
             }
-        })
+        });
+
         return retval || lists;
-    }
+    };
 
 })(window.jQuery || window.Zepto, window, document);
